@@ -2,10 +2,10 @@
 
 一个自托管的番茄钟小工具。注册账号后即可开始番茄计时，和普通番茄钟的区别在于它会记录"你有没有走神"：
 
-- **摄像头模式**：番茄进行期间，浏览器调用摄像头持续录制视频数据并上传到后端，供事后回看或后续做注意力分析。
-- **走神按钮模式**：页面上有一个很大的按钮，走神的时候按一下，系统记录一次走神事件及其发生时刻。
+- **摄像头记录**：番茄进行期间，浏览器调用摄像头持续录制视频数据并上传到后端，供事后回看或后续做注意力分析。
+- **走神按钮**：页面上有一个很大的按钮，走神的时候按一下，系统记录一次走神事件及其发生时刻。
 
-两种模式可单独使用，也可以同时开启。
+这两项不是可选模式，而是每个番茄都默认同时开启。开始一个番茄，摄像头就开始录，大按钮就在那里。摄像头不可用（没有设备或用户拒绝授权）时番茄照常进行，只是本次会话标记为“无视频”。
 
 ---
 
@@ -15,7 +15,7 @@
 
 - 多用户：支持自助注册、登录，数据按用户隔离。
 - 番茄计时：可配置专注/休息时长，支持开始、暂停、放弃、完成。
-- 走神记录：按钮事件、视频片段两类数据都挂在一次番茄会话下。
+- 走神记录：每个番茄会话都同时附带按钮事件和视频片段两类数据，无需用户选择。
 - 存储可替换：第一阶段用本地 JSON 文件，第二阶段无改动业务代码切到 MySQL。
 - 前后端同仓库：FastAPI 直接托管静态前端，一条命令启动。
 
@@ -105,7 +105,6 @@ flowchart LR
   "short_break_minutes": 5,
   "long_break_minutes": 15,
   "long_break_every": 4,
-  "default_mode": "button",
   "video_chunk_seconds": 10
 }
 ```
@@ -118,7 +117,7 @@ flowchart LR
 |---|---|---|
 | id | uuid | |
 | user_id | uuid | |
-| mode | enum: `button` / `camera` / `both` | 本次会话开启的记录方式 |
+| camera_status | enum: `recording` / `unavailable` / `denied` | 摄像头状态。`unavailable` 无设备，`denied` 用户拒绝授权 |
 | planned_seconds | int | 计划专注时长 |
 | started_at | datetime | |
 | ended_at | datetime，可空 | 结束（完成或放弃）时间 |
@@ -176,7 +175,7 @@ flowchart LR
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/sessions` | `{mode, planned_seconds?}` → 创建并开始，返回会话 |
+| POST | `/api/sessions` | `{planned_seconds?, camera_status}` → 创建并开始，返回会话。前端先申请摄像头权限，再带着结果创建会话 |
 | GET | `/api/sessions/current` | 当前 running/paused 的会话，没有返回 204 |
 | GET | `/api/sessions` | 分页列表，`?page=&size=&from=&to=` |
 | GET | `/api/sessions/{id}` | 详情，含走神事件列表与分片列表 |
@@ -223,11 +222,11 @@ flowchart LR
 
 | 路径 | 页面 | 内容 |
 |---|---|---|
-| `/` | 仪表盘 | 今日概览、开始按钮、模式选择（按钮 / 摄像头 / 两者） |
+| `/` | 仪表盘 | 今日概览、一个“开始番茄”按钮 |
 | `/login` | 登录/注册 | 一个页面两个 Tab |
 | `/focus` | 计时页 | 核心页面，见下 |
 | `/history` | 历史 | 会话列表，点开看走神时间轴、视频回放 |
-| `/settings` | 设置 | 时长、默认模式、分片长度 |
+| `/settings` | 设置 | 时长、分片长度、摄像头分辨率 |
 
 ### 6.1 计时页 `/focus`
 
@@ -247,7 +246,7 @@ flowchart LR
 │                                              │
 │      [暂停]        [放弃]        [撤销上次]   │
 │                                              │
-│  摄像头模式：右下角小窗预览，可折叠            │
+│  右下角：摄像头小窗预览，可折叠                │
 └──────────────────────────────────────────────┘
 ```
 
@@ -266,9 +265,10 @@ sequenceDiagram
     participant B as 浏览器
     participant S as 后端
 
-    U->>B: 选择摄像头模式，点击开始
+    U->>B: 点击开始番茄
     B->>B: getUserMedia({video:true, audio:false})
-    B->>S: POST /api/sessions {mode:"camera"}
+    Note over B: 失败则 camera_status=denied/unavailable，番茄照常开始
+    B->>S: POST /api/sessions {camera_status}
     S-->>B: session
     B->>B: MediaRecorder.start(chunk_seconds*1000)
     loop 每个分片
@@ -285,6 +285,7 @@ sequenceDiagram
 - 分辨率默认 640×480、15 fps，`videoBitsPerSecond` 约 400 kbps，一个 25 分钟番茄约 75 MB。
 - 分片上传失败进入本地 IndexedDB 队列，会话结束前重试；页面关闭时用 `sendBeacon` 尽力上传最后一片。
 - 首次使用弹出隐私说明：视频只保存在自己部署的服务器上，不做上传到第三方。
+- 摄像头默认开启，没有关闭开关。授权被拒绝时页面顶部持续显示“本次无视频记录”提示，并给出重新授权入口。
 
 ---
 
@@ -343,7 +344,7 @@ CREATE TABLE users (
 CREATE TABLE pomodoro_sessions (
   id                CHAR(36) PRIMARY KEY,
   user_id           CHAR(36) NOT NULL,
-  mode              ENUM('button','camera','both') NOT NULL,
+  camera_status     ENUM('recording','unavailable','denied') NOT NULL,
   planned_seconds   INT NOT NULL,
   started_at        DATETIME(3) NOT NULL,
   ended_at          DATETIME(3) NULL,

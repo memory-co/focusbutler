@@ -35,7 +35,7 @@
 | 认证 | 用户名 + 密码，`bcrypt` 哈希，JWT（HttpOnly Cookie） | 无需引入 session 中间件 |
 | 数据校验 | Pydantic v2 | 请求/响应模型，也是 JSON 存储的序列化格式 |
 | 存储 v1 | 本地 JSON 文件（`data/*.json`） | 单进程，文件锁保证写入安全 |
-| 存储 v2 | MySQL 8 + SQLAlchemy 2 (async) + Alembic | 通过 Repository 接口切换 |
+| 存储 v2 | MySQL 5.6（阿里云 RDS）+ SQLAlchemy 2 (async, aiomysql) + Alembic | 通过 Repository 接口切换 |
 | 视频存储 | 本地文件系统（`data/videos/`） | 元数据进数据库，二进制不进数据库 |
 | 前端 | 原生 HTML + CSS + JavaScript（无构建步骤） | 由 FastAPI `StaticFiles` 托管 |
 | 摄像头 | `navigator.mediaDevices.getUserMedia` + `MediaRecorder` | WebM 分片上传 |
@@ -337,7 +337,7 @@ CREATE TABLE users (
   id            CHAR(36) PRIMARY KEY,
   username      VARCHAR(32) NOT NULL UNIQUE,
   password_hash VARCHAR(100) NOT NULL,
-  settings      JSON NOT NULL,
+  settings      TEXT NOT NULL,          -- JSON 字符串，RDS 是 5.6 没有 JSON 类型
   created_at    DATETIME(3) NOT NULL
 );
 
@@ -387,6 +387,13 @@ CREATE TABLE video_chunks (
 ```
 
 视频二进制仍然放文件系统，MySQL 只存元数据。
+
+目标实例是 MySQL 5.6.16，几个兼容性约束：
+
+- 没有 `JSON` 列类型，`settings` 存 `TEXT`，应用层负责序列化，不在 SQL 里查 settings 内部字段。
+- 不支持 `CHECK` 约束，枚举约束靠 `ENUM` 列和应用层校验。
+- 建表时显式指定 `CHARSET=utf8mb4`，服务器默认是 `utf8`（三字节，存不了 emoji）。
+- utf8mb4 下索引键长上限 767 字节，`VARCHAR` 索引列长度不超过 191。当前 schema 里最长的索引列是 `username VARCHAR(32)`，没有问题。
 
 ---
 

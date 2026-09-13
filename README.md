@@ -20,7 +20,8 @@
 ## 快速开始
 
 ```bash
-# 后端
+# 后端（ffmpeg 用于合成可跳转的回放视频）
+sudo apt-get install -y ffmpeg
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env          # 填 MySQL 连接信息和 JWT 密钥
 # 前端
@@ -52,7 +53,7 @@ data/videos/        视频分片 {user_id}/{session_id}/{seq}.webm（不进 git�
 - **计时以服务端为准**。会话记录 `started_at` 和累计暂停秒数，前端只做插值，切回标签页会重新校准，后台标签页不会漂移。
 - **到点不自动结束**。计划时间到只提醒一次，计时继续，用户自己点结束，实际专注时长按结束时刻算，可以按自己的节奏略微延长。
 - **走神按钮先本地计数再发请求**，失败进 localStorage 队列稍后重试；服务端对同一会话 30 秒内的重复请求只返回上一次的事件。按钮本身也有 30 秒冷却并显示倒计时，防止小朋友按着玩。
-- **视频分片顺序拼接即可播放**。`MediaRecorder` 切出的分片只有第一片带文件头，所以回放接口把分片按序拼成一个流返回，不做转码。
+- **回放用 ffmpeg 合成**。`MediaRecorder` 切出的 WebM 没有时长和索引，播放器不能跳转；番茄结束时后台用 ffmpeg 只换容器不重编码，合成一个可跳转的 `full.webm`。历史页时间线按分片表把专注秒数换算成视频位置，点哪跳哪。没有 ffmpeg 时退回顺序拼接流，只能从头播。
 - **全库 UTC**。MySQL `DATETIME(3)` 不带时区，统一存 UTC，统计接口接收 `tz_offset` 按本地日期分组。
 - **MySQL 5.6 约束**：没有 JSON 列类型（用户设置存 TEXT），建表显式 utf8mb4。
 - **跨用户访问一律 404**，不返回 403，避免枚举。

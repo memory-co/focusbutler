@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, CameraOff, Pause, Play, RotateCcw, Square } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Camera, CameraOff, Check, Pause, Play, RotateCcw, Square } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CameraPreview } from "@/components/CameraPreview";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -163,12 +163,16 @@ export default function Focus() {
     }
   }, [finish, qc, settings]);
 
-  // 时间到自动完成
+  // 时间到不自动结束：提醒一次，然后继续计时（超时部分也算专注），用户自己点结束
   const left = active ? remaining() : 0;
+  const overtime = active && left <= 0;
+  const remindedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (active && session?.status === "running" && left <= 0 && !busy) void complete();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, session?.status, left <= 0, busy]);
+    if (overtime && session && remindedFor.current !== session.id) {
+      remindedFor.current = session.id;
+      notify("番茄时间到", "可以按自己的节奏结束，超出的时间也会记录");
+    }
+  }, [overtime, session]);
 
   if (session === undefined) return <div className="p-8 text-center text-muted-foreground">加载中…</div>;
 
@@ -198,11 +202,14 @@ export default function Focus() {
       </div>
 
       <div className="text-center">
-        <div className={cn("timer-digits text-7xl font-light sm:text-8xl", paused && "text-muted-foreground")}>{mmss(left)}</div>
+        <div className={cn("timer-digits text-7xl font-light sm:text-8xl", paused && "text-muted-foreground", overtime && "text-primary")}>
+          {overtime ? `+${mmss(-left)}` : mmss(left)}
+        </div>
         <div className="mx-auto mt-4 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-muted">
           <div className="h-full bg-primary transition-[width] duration-300" style={{ width: `${progress * 100}%` }} />
         </div>
         {paused && <div className="mt-2 text-sm text-muted-foreground">已暂停</div>}
+        {overtime && !paused && <div className="mt-2 text-sm text-muted-foreground">时间到了，按自己的节奏结束就好</div>}
       </div>
 
       <button className={cn("distract-btn", pressed && "pressed")} onClick={onDistract} disabled={busy} aria-label="我走神了">
@@ -232,7 +239,9 @@ export default function Focus() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        <Button variant="ghost" disabled={busy} onClick={() => void complete()}>提前完成</Button>
+        <Button variant={overtime ? "default" : "ghost"} disabled={busy} onClick={() => void complete()}>
+          <Check className="mr-1 h-4 w-4" /> {overtime ? "结束番茄" : "提前结束"}
+        </Button>
       </div>
 
       <CameraPreview stream={stream} />

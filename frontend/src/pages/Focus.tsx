@@ -7,7 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, ApiError, tzOffset } from "@/lib/api";
-import { useFocus } from "@/lib/focus-store";
+import { DISTRACT_COOLDOWN, useFocus } from "@/lib/focus-store";
 import { mmss } from "@/lib/format";
 import { notify, requestNotifyPermission, vibrate } from "@/lib/notify";
 import { navigate } from "@/lib/router";
@@ -102,6 +102,7 @@ export default function Focus() {
   const busy = useFocus((s) => s.busy);
   const lastDistraction = useFocus((s) => s.lastDistraction);
   const pending = useFocus((s) => s.pendingDistractions);
+  const cooldownUntil = useFocus((s) => s.cooldownUntil);
   const { loadCurrent, pause, resume, finish, distract, undoLast, flushQueue, attachCamera, elapsed, remaining } = useFocus();
   const settings = useAuth((s) => s.user?.settings);
   const qc = useQueryClient();
@@ -129,7 +130,7 @@ export default function Focus() {
   }, [loadCurrent]);
 
   const onDistract = useCallback(() => {
-    if (!active) return;
+    if (!active || Date.now() < useFocus.getState().cooldownUntil) return;
     setPressed(true);
     vibrate(40);
     setTimeout(() => setPressed(false), 180);
@@ -183,6 +184,7 @@ export default function Focus() {
 
   const progress = Math.min(1, elapsed() / session.planned_seconds);
   const paused = session.status === "paused";
+  const cooldownLeft = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-4 sm:p-8 appear">
@@ -212,9 +214,21 @@ export default function Focus() {
         {overtime && !paused && <div className="mt-2 text-sm text-muted-foreground">时间到了，按自己的节奏结束就好</div>}
       </div>
 
-      <button className={cn("distract-btn", pressed && "pressed")} onClick={onDistract} disabled={busy} aria-label="我走神了">
-        <div className="text-3xl font-medium tracking-[0.3em] sm:text-4xl">我走神了</div>
-        <div className="mt-3 text-sm opacity-80">本次已走神 {session.distraction_count} 次 · 空格键也可以</div>
+      <button className={cn("distract-btn", pressed && "pressed", cooldownLeft > 0 && "cooling")} onClick={onDistract} disabled={busy || cooldownLeft > 0} aria-label="我走神了">
+        {cooldownLeft > 0 ? (
+          <>
+            <div className="text-2xl font-medium sm:text-3xl">已记下，回到专注</div>
+            <div className="mt-3 text-sm opacity-80">{cooldownLeft} 秒后才能再按 · 本次已走神 {session.distraction_count} 次</div>
+            <div className="mx-auto mt-4 h-1 w-40 overflow-hidden rounded-full bg-current/20">
+              <div className="h-full bg-current transition-[width] duration-300" style={{ width: `${(1 - cooldownLeft / DISTRACT_COOLDOWN) * 100}%` }} />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-3xl font-medium tracking-[0.3em] sm:text-4xl">我走神了</div>
+            <div className="mt-3 text-sm opacity-80">本次已走神 {session.distraction_count} 次 · 空格键也可以</div>
+          </>
+        )}
       </button>
 
       <div className="flex flex-wrap items-center justify-center gap-2">

@@ -18,7 +18,7 @@ from app.models import (
 from app.schemas import SessionDetail, SessionOut
 
 ACTIVE = (SessionStatus.running, SessionStatus.paused)
-DEBOUNCE = timedelta(seconds=2)
+COOLDOWN = timedelta(seconds=30)  # 走神按钮冷却，防止反复按着玩
 
 
 def elapsed_seconds(s: PomodoroSession, now: datetime | None = None) -> int:
@@ -120,10 +120,10 @@ async def end(db: AsyncSession, s: PomodoroSession, final: SessionStatus, note: 
 async def add_distraction(db: AsyncSession, s: PomodoroSession) -> DistractionEvent:
     _require(s, *ACTIVE)
     now = utcnow()
-    # 2 秒去抖：手抖连点只记一次
+    # 冷却期内的重复请求返回已有事件，不新建
     q = (
         select(DistractionEvent)
-        .where(DistractionEvent.session_id == s.id, DistractionEvent.occurred_at >= now - DEBOUNCE)
+        .where(DistractionEvent.session_id == s.id, DistractionEvent.occurred_at >= now - COOLDOWN)
         .order_by(DistractionEvent.occurred_at.desc())
     )
     recent = (await db.execute(q)).scalars().first()

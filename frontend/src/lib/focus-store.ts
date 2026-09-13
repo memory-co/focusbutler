@@ -9,6 +9,8 @@ import { useAuth } from "./store";
 import type { CameraStatus, Distraction, Session } from "./types";
 
 const QUEUE_KEY = "focusbutler.distraction-queue.v1";
+/** 走神按钮冷却秒数，和后端 session_service.COOLDOWN 保持一致 */
+export const DISTRACT_COOLDOWN = 30;
 
 interface UploadStatus {
   uploading: number;
@@ -26,6 +28,8 @@ interface FocusState {
   cameraStatus: CameraStatus | null;
   upload: UploadStatus;
   lastDistraction: Distraction | null;
+  /** 冷却结束的本地时间戳（ms） */
+  cooldownUntil: number;
   pendingDistractions: number;
   busy: boolean;
 
@@ -73,6 +77,7 @@ export const useFocus = create<FocusState>()((set, get) => {
     cameraStatus: null,
     upload: { uploading: 0, failed: 0, uploaded: 0 },
     lastDistraction: null,
+    cooldownUntil: 0,
     pendingDistractions: readQueue().length,
     busy: false,
 
@@ -89,7 +94,17 @@ export const useFocus = create<FocusState>()((set, get) => {
 
     loadCurrent: async () => {
       const s = (await api<Session | undefined>("/sessions/current")) ?? null;
-      return apply(s);
+      apply(s);
+      // 刷新页面后从最后一次走神恢复冷却，免得靠刷新绕过
+      if (s && s.distraction_count > 0) {
+        const events = await api<Distraction[]>(`/sessions/${s.id}/distractions`).catch(() => []);
+        const last = events[events.length - 1];
+        if (last) {
+          const at = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(last.occurred_at) ? last.occurred_at : last.occurred_at + "Z").getTime();
+          set({ lastDistraction: last, cooldownUntil: Math.max(get().cooldownUntil, at + DISTRACT_COOLDOWN * 1000) });
+        }
+      }
+      return s;
     },
 
     start: async () => {
@@ -156,7 +171,7 @@ export const useFocus = create<FocusState>()((set, get) => {
         await get().detachCamera(); // 先传完最后一片，再结束会话
         const done = await api<Session>(`/sessions/${s.id}/${kind}`, { method: "POST", body: { note } });
         apply(null);
-        set({ lastDistraction: null, cameraStatus: null });
+        set({ lastDistraction: null, cameraStatus: null, cooldownUntil: 0 });
         return done;
       } finally {
         set({ busy: false });
@@ -166,10 +181,17 @@ export const useFocus = create<FocusState>()((set, get) => {
     distract: async () => {
       const s = get().session;
       if (!s || (s.status !== "running" && s.status !== "paused")) return;
-      // 先本地计数再发请求，网络失败进队列
-      set({ session: { ...s, distraction_count: s.distraction_count + 1 } });
+      if (Date.now() < get().cooldownUntil) return;
+      // 先本地计数、进入冷却，再发请求；网络失败进队列
+      set({ session: { ...s, distraction_count: s.distraction_count + 1 }, cooldownUntil: Date.now() + DISTRACT_COOLDOWN * 1000 });
       try {
         const ev = await api<Distraction>(`/sessions/${s.id}/distractions`, { method: "POST" });
+        if (ev.id === get().lastDistraction?.id) {
+          // 服务端判定还在冷却期，返回的是上一次的事件：撤掉本地多加的一次
+          const cur = get().session;
+          if (cur) set({ session: { ...cur, distraction_count: Math.max(0, cur.distraction_count - 1) } });
+          return;
+        }
         set({ lastDistraction: ev });
       } catch {
         const q = readQueue();

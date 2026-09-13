@@ -36,6 +36,7 @@
   .distract-btn:hover { @apply bg-destructive/10; }
   .distract-btn:active, .distract-btn.pressed { @apply bg-destructive text-destructive-foreground; transform: scale(0.985); }
   .distract-btn:disabled { @apply opacity-40 pointer-events-none; }
+  .distract-btn.cooling { @apply opacity-100 border-muted-foreground/30 bg-muted text-muted-foreground; box-shadow: none; }
   .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d33; animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }

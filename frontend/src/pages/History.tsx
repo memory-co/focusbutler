@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { VideoTimeline } from "@/components/VideoTimeline";
 import { api } from "@/lib/api";
 import { fmtDateTime, fmtTime, minutes, mmss } from "@/lib/format";
 import { navigate } from "@/lib/router";
@@ -50,9 +51,6 @@ function Detail({ id }: { id: string }) {
   if (!q.data) return <Skeleton className="h-64 w-full" />;
   const s = q.data;
   const hasVideo = s.chunks.length > 0;
-  const seek = (sec: number) => {
-    if (video.current) { video.current.currentTime = sec; void video.current.play(); }
-  };
 
   return (
     <div className="space-y-6 appear">
@@ -89,30 +87,7 @@ function Detail({ id }: { id: string }) {
       <Card>
         <CardContent className="p-4">
           <div className="eyebrow mb-3">走神时间轴</div>
-          <div className="relative h-8 rounded bg-muted">
-            <div className="absolute inset-y-0 left-0 rounded bg-primary/20" style={{ width: `${Math.min(100, (s.elapsed_seconds / s.planned_seconds) * 100)}%` }} />
-            {s.distractions.map((d) => (
-              <button
-                key={d.id}
-                title={`${mmss(d.offset_seconds)} 走神`}
-                className="absolute top-0 h-full w-1 -translate-x-1/2 rounded bg-destructive hover:w-1.5"
-                style={{ left: `${Math.min(100, (d.offset_seconds / s.planned_seconds) * 100)}%` }}
-                onClick={() => hasVideo && seek(d.offset_seconds)}
-              />
-            ))}
-          </div>
-          <div className="mt-1 flex justify-between text-[10px] text-muted-foreground"><span>00:00</span><span>{mmss(s.planned_seconds)}</span></div>
-          {s.distractions.length > 0 && (
-            <ul className="mt-4 flex flex-wrap gap-2">
-              {s.distractions.map((d, i) => (
-                <li key={d.id}>
-                  <Button variant="outline" size="sm" className="tabular-nums" onClick={() => hasVideo && seek(d.offset_seconds)}>
-                    #{i + 1} · {mmss(d.offset_seconds)}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <VideoTimeline video={video} hasVideo={hasVideo} chunks={s.chunks} distractions={s.distractions} plannedSeconds={s.planned_seconds} elapsedSeconds={s.elapsed_seconds} />
         </CardContent>
       </Card>
 

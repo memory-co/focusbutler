@@ -13,6 +13,7 @@ from app.db import get_db
 from app.models import User, VideoChunk
 from app.schemas import VideoChunkOut
 from app.services import session_service as svc
+from app.services import video_service
 
 router = APIRouter(prefix="/api", tags=["video"])
 
@@ -73,24 +74,25 @@ async def list_chunks(session_id: str, user: User = Depends(get_current_user), d
 
 @router.get("/sessions/{session_id}/video")
 async def stream_video(session_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """把所有分片按 seq 顺序拼成一个 WebM 流。
+    """回放整段视频。
 
-    MediaRecorder 用 timeslice 切出来的分片只有第一片带文件头，单独不能播，
-    但按顺序拼接就是一个完整的 WebM，所以回放走这一个接口。
+    优先返回 ffmpeg 合成的 full.webm（带时长和索引，FileResponse 支持 Range，播放器可以跳转）。
+    老会话没有合成文件就现场合成一次；ffmpeg 不可用时退回把分片按序拼成一个流，
+    这种流只能从头播、不能跳转。
     """
     await svc.get_owned(db, user, session_id)
-    q = select(VideoChunk).where(VideoChunk.session_id == session_id).order_by(VideoChunk.seq)
-    chunks = (await db.execute(q)).scalars().all()
-    if not chunks:
+    paths = await video_service.chunk_paths(db, session_id)
+    if not paths:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "该会话没有视频")
 
-    paths = [settings.video_dir / c.path for c in chunks]
-    total = sum(p.stat().st_size for p in paths if p.exists())
+    merged = await video_service.build_merged(user.id, session_id, paths)
+    if merged:
+        return FileResponse(merged, media_type="video/webm", headers={"Cache-Control": "private, max-age=3600"})
+
+    total = sum(p.stat().st_size for p in paths)
 
     async def body() -> AsyncIterator[bytes]:
         for p in paths:
-            if not p.exists():
-                continue
             async with aiofiles.open(p, "rb") as f:
                 while data := await f.read(256 * 1024):
                     yield data

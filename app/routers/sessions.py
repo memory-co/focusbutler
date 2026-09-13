@@ -1,7 +1,7 @@
 import shutil
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,6 +12,7 @@ from app.db import get_db
 from app.models import PomodoroSession, SessionStatus, User
 from app.schemas import SessionCreate, SessionDetail, SessionEnd, SessionOut, SessionPage
 from app.services import session_service as svc
+from app.services import video_service
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -82,18 +83,32 @@ async def resume_session(session_id: str, user: User = Depends(get_current_user)
 
 @router.post("/{session_id}/complete", response_model=SessionOut)
 async def complete_session(
-    session_id: str, body: SessionEnd | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    session_id: str,
+    background: BackgroundTasks,
+    body: SessionEnd | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     s = await svc.get_owned(db, user, session_id)
-    return svc.to_out(await svc.end(db, s, SessionStatus.completed, body.note if body else None))
+    out = svc.to_out(await svc.end(db, s, SessionStatus.completed, body.note if body else None))
+    # 结束后把分片合成可跳转的完整文件，不阻塞响应
+    background.add_task(video_service.build_merged_for_session, user.id, session_id)
+    return out
 
 
 @router.post("/{session_id}/abandon", response_model=SessionOut)
 async def abandon_session(
-    session_id: str, body: SessionEnd | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    session_id: str,
+    background: BackgroundTasks,
+    body: SessionEnd | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     s = await svc.get_owned(db, user, session_id)
-    return svc.to_out(await svc.end(db, s, SessionStatus.abandoned, body.note if body else None))
+    out = svc.to_out(await svc.end(db, s, SessionStatus.abandoned, body.note if body else None))
+    # 结束后把分片合成可跳转的完整文件，不阻塞响应
+    background.add_task(video_service.build_merged_for_session, user.id, session_id)
+    return out
 
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

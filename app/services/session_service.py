@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -19,6 +19,20 @@ from app.schemas import SessionDetail, SessionOut
 
 ACTIVE = (SessionStatus.running, SessionStatus.paused)
 COOLDOWN = timedelta(seconds=30)  # 走神按钮冷却，防止反复按着玩
+
+
+async def recount_distractions(db: AsyncSession, session_id: str) -> int:
+    """从事件表重算走神次数并回写。
+
+    distraction_count 是冗余计数，用 +=/-= 维护会在重复/并发请求下漂移
+    （Cloudflare 会重试幂等的 DELETE），所以每次增删后都从真实行数重算。
+    """
+    n = (
+        await db.execute(
+            select(func.count()).select_from(DistractionEvent).where(DistractionEvent.session_id == session_id)
+        )
+    ).scalar_one()
+    return int(n)
 
 
 def elapsed_seconds(s: PomodoroSession, now: datetime | None = None) -> int:
@@ -136,8 +150,9 @@ async def add_distraction(db: AsyncSession, s: PomodoroSession) -> DistractionEv
         offset_seconds=elapsed_seconds(s, now),
         source=DistractionSource.button,
     )
-    s.distraction_count += 1
     db.add(ev)
+    await db.flush()
+    s.distraction_count = await recount_distractions(db, s.id)
     await db.commit()
     await db.refresh(ev)
     return ev

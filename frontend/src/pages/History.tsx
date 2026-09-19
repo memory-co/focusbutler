@@ -59,7 +59,7 @@ function Detail({ id }: { id: string }) {
         <div>
           <div className="text-sm font-medium">{fmtDateTime(s.started_at)}{s.ended_at && ` – ${fmtTime(s.ended_at)}`}</div>
           <div className="text-xs text-muted-foreground">
-            专注 {mmss(s.elapsed_seconds)} / 计划 {mmss(s.planned_seconds)} · 走神 {s.distraction_count} 次{s.paused_seconds > 0 && ` · 暂停 ${mmss(s.paused_seconds)}`}
+            专注 {mmss(s.elapsed_seconds)} / 计划 {mmss(s.planned_seconds)} · 走神 {s.distractions.length} 次{s.paused_seconds > 0 && ` · 暂停 ${mmss(s.paused_seconds)}`}
           </div>
         </div>
         <Badge className="ml-auto" variant={STATUS[s.status].variant}>{STATUS[s.status].label}</Badge>

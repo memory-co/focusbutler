@@ -35,7 +35,8 @@ async def delete_distraction(event_id: str, user: User = Depends(get_current_use
     if ev is None or ev.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "事件不存在")
     s = await db.get(PomodoroSession, ev.session_id)
-    if s and s.distraction_count > 0:
-        s.distraction_count -= 1
     await db.delete(ev)
+    await db.flush()
+    if s:
+        s.distraction_count = await svc.recount_distractions(db, s.id)
     await db.commit()
